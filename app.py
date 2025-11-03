@@ -156,8 +156,8 @@ def show_home_dashboard():
     st.write("""
     ArtCrypt adalah platform untuk melindungi karya digital Anda dengan enkripsi multi-layer:
     - **🔐 Autentikasi**: Camellia CBC + HMAC-SHA384 untuk login yang aman
-    - **📝 Metadata**: Caesar Cipher + AES-128-GCM + Camellia CBC  
-    - **📁 File**: ChaCha20-Poly1305 + Camellia CBC untuk enkripsi file
+    - **📝 Metadata**: Caesar Cipher + AES-128-GCM + Camellia CBC
+    - **📁 File**: AES-128-CTR + Camellia CBC untuk enkripsi file
     - **🖼️ Watermark**: True Bit Plane Slicing untuk gambar
     """)
 
@@ -216,6 +216,8 @@ def show_upload_section():
             else:
                 st.warning("⚠️ Harap isi judul dan pilih file!")
 
+
+
 def show_gallery_section():
     """Show artwork gallery with delete button"""
     st.header("🖼️ Galeri Karya Saya")
@@ -231,95 +233,96 @@ def show_gallery_section():
     
     if not artworks:
         st.info("📝 Belum ada karya yang diupload. Mulai upload karya pertama Anda!")
-    else:
-        # Tampilkan jumlah karya
-        st.success(f"📊 Anda memiliki {len(artworks)} karya")
-        
-        for art_id, title_enc, desc_enc, file_data, file_type, watermark in artworks:
-            try:
-                # Decrypt metadata
-                title = decrypt_metadata(title_enc)
-                description = decrypt_metadata(desc_enc)
-                
-                # Decrypt file
-                file_decrypted = decrypt_file(file_data)
-                
-                with st.expander(f"🎨 {title}", expanded=False):
-                    st.write(f"**📝 Deskripsi:** {description}")
-                    st.write(f"**📄 Tipe File:** {file_type}")
-                    
-                    # File display section
-                    if file_type.startswith('image'):
-                        # Tampilkan gambar
-                        st.image(file_decrypted, use_container_width=True)
-                        
-                        # Watermark verification untuk gambar
-                        if watermark:
-                            wm_text = decrypt_metadata(watermark)
-                            extracted_wm = extract_watermark_from_bytes(file_decrypted)
-                            
-                            st.write("---")
-                            st.subheader("🔍 Verifikasi Watermark")
-                            
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.write(f"**Watermark Terenkripsi:**")
-                                st.code(wm_text)
-                            
-                            with col2:
-                                st.write(f"**Watermark Terekstrak:**")
-                                st.code(extracted_wm)
-                            
-                            # Verifikasi
-                            if wm_text == extracted_wm:
-                                st.success("✅ **KARYA ASLI** - Watermark valid dan sesuai!")
-                            else:
-                                st.error("❌ **KARYA TIDAK VALID** - Watermark tidak cocok!")
-                                st.warning("⚠️ Kemungkinan karya telah dimodifikasi atau bukan karya asli!")
-                    else:
-                        # Untuk file non-gambar
-                        st.info(f"📁 File {file_type.split('/')[-1].upper()}")
-                    
-                    # Tombol Download dan Hapus dalam kolom yang sama
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Download button untuk semua file
-                        file_extension = file_type.split('/')[-1] if '/' in file_type else 'file'
-                        st.download_button(
-                            label="📥 Download File",
-                            data=file_decrypted,
-                            file_name=f"{title}.{file_extension}",
-                            mime=file_type,
-                            use_container_width=True,
-                            key=f"download_{art_id}"
-                        )
-                    
-                    with col2:
-                        # TOMBOL HAPUS - LANGSUNG HAPUS TANPA KONFIRMASI CHECKBOX
-                        if st.button("🗑️ Hapus Karya", 
-                                   use_container_width=True,
-                                   key=f"delete_{art_id}",
-                                   type="secondary"):
-                            try:
-                                # Hapus dari database
-                                cursor.execute("DELETE FROM artworks WHERE id = ? AND user_id = ?", 
-                                             (art_id, st.session_state.user_id))
-                                conn.commit()
-                                
-                                if cursor.rowcount > 0:
-                                    st.success(f"✅ Karya '{title}' berhasil dihapus!")
-                                    st.rerun()  # Refresh halaman
-                                else:
-                                    st.error("❌ Gagal menghapus karya")
-                            except Exception as e:
-                                st.error(f"❌ Error: {str(e)}")
+        conn.close()
+        return
+    
+    # Tampilkan jumlah karya
+    st.success(f"📊 Anda memiliki {len(artworks)} karya")
+    
+    for art_id, title_enc, desc_enc, file_data, file_type, watermark in artworks:
+        try:
+            # Decrypt metadata
+            title = decrypt_metadata(title_enc)
+            description = decrypt_metadata(desc_enc)
             
-            except Exception as e:
-                st.error(f"❌ Error memuat karya ID {art_id}: {str(e)}")
+            # Decrypt file
+            file_decrypted = decrypt_file(file_data)
+            
+            with st.expander(f"🎨 {title}", expanded=False):
+                st.write(f"**📝 Deskripsi:** {description}")
+                st.write(f"**📄 Tipe File:** {file_type}")
+                
+                # File display section
+                if file_type.startswith('image'):
+                    # Tampilkan gambar
+                    st.image(file_decrypted, use_container_width=True)
+                    
+                    # Watermark verification untuk gambar
+                    if watermark:
+                        wm_text = decrypt_metadata(watermark)
+                        extracted_wm = extract_watermark_from_bytes(file_decrypted)
+                        
+                        st.write("---")
+                        st.subheader("🔍 Verifikasi Watermark")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"**Watermark Terenkripsi:**")
+                            st.code(wm_text)
+                        
+                        with col2:
+                            st.write(f"**Watermark Terekstrak:**")
+                            st.code(extracted_wm)
+                        
+                        # Verifikasi
+                        if wm_text == extracted_wm:
+                            st.success("✅ **KARYA ASLI** - Watermark valid dan sesuai!")
+                        else:
+                            st.error("❌ **KARYA TIDAK VALID** - Watermark tidak cocok!")
+                            st.warning("⚠️ Kemungkinan karya telah dimodifikasi atau bukan karya asli!")
+                else:
+                    # Untuk file non-gambar
+                    st.info(f"📁 File {file_type.split('/')[-1].upper()}")
+                
+                # Tombol Download dan Hapus dalam kolom yang sama
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Download button untuk semua file
+                    file_extension = file_type.split('/')[-1] if '/' in file_type else 'file'
+                    st.download_button(
+                        label="📥 Download File",
+                        data=file_decrypted,
+                        file_name=f"{title}.{file_extension}",
+                        mime=file_type,
+                        use_container_width=True,
+                        key=f"download_{art_id}"
+                    )
+                
+                with col2:
+                    # TOMBOL HAPUS - dengan key yang unik
+                    if st.button("🗑️ Hapus Karya", 
+                               use_container_width=True,
+                               key=f"delete_{art_id}",
+                               type="secondary"):
+                        try:
+                            # Hapus dari database
+                            cursor.execute("DELETE FROM artworks WHERE id = ? AND user_id = ?", 
+                                         (art_id, st.session_state.user_id))
+                            conn.commit()
+                            
+                            if cursor.rowcount > 0:
+                                st.success(f"✅ Karya '{title}' berhasil dihapus!")
+                                st.rerun()  # Refresh halaman
+                            else:
+                                st.error("❌ Gagal menghapus karya")
+                        except Exception as e:
+                            st.error(f"❌ Error: {str(e)}")
+        
+        except Exception as e:
+            st.error(f"❌ Error memuat karya ID {art_id}: {str(e)}")
     
     conn.close()
-
 
 def show_verification_section():
     """NEW: Show artwork verification section"""
