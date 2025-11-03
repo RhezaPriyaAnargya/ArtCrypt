@@ -2,7 +2,7 @@ import base64
 import os
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import hashes, hmac
-from Crypto.Cipher import AES, ChaCha20
+from Crypto.Cipher import AES
 from PIL import Image
 import numpy as np
 from io import BytesIO
@@ -82,7 +82,7 @@ def caesar_encrypt(text, shift=3):
             base = 65 if char.isupper() else 97
             result += chr((ord(char) - base + shift) % 26 + base)
         else:
-            result += char
+            result += char  
     return result
 
 def caesar_decrypt(text, shift=3):
@@ -124,67 +124,108 @@ def decrypt_metadata(encrypted_data):
     # 3. Caesar decrypt
     return caesar_decrypt(aes_decrypted.decode())
 
-# === FILE ENCRYPTION ===
-def salsa20_encrypt(data):
-    """Salsa20/ChaCha20 encryption → Base64"""
+# === FILE ENCRYPTION (AES-CTR) ===
+def aes_ctr_encrypt(data):
+    """AES-128-CTR encryption → Base64"""
+    # Nonce 8 bytes + Counter 8 bytes = 16 bytes total
     nonce = os.urandom(8)
-    cipher = ChaCha20.new(key=MASTER_KEY[:32], nonce=nonce)
-    encrypted = cipher.encrypt(data)
-    return base64.b64encode(nonce + encrypted).decode()
 
-def salsa20_decrypt(encrypted_data):
-    """Base64 decode → Salsa20/ChaCha20 decryption → bytes"""
+    # Buat cipher AES-128-CTR
+    # Format: nonce (8 bytes) akan digabung dengan counter (8 bytes) secara internal
+    cipher = AES.new(MASTER_KEY[:16], AES.MODE_CTR, nonce=nonce)
+    
+    # Encrypt data (CTR mode tidak butuh padding)
+    ciphertext = cipher.encrypt(data)
+    
+    return base64.b64encode(nonce + ciphertext).decode()
+
+def aes_ctr_decrypt(encrypted_data):
+    """Base64 decode → AES-CTR decryption → bytes"""
     data = base64.b64decode(encrypted_data)
-    nonce, encrypted = data[:8], data[8:]
-    cipher = ChaCha20.new(key=MASTER_KEY[:32], nonce=nonce)
-    return cipher.decrypt(encrypted)
+    
+    # Extract nonce (8 bytes) dan ciphertext
+    nonce, ciphertext = data[:8], data[8:]
+    
+    # Buat cipher AES-CTR dengan nonce yang sama
+    cipher = AES.new(MASTER_KEY[:16], AES.MODE_CTR, nonce=nonce)
+    
+    # Decrypt data
+    return cipher.decrypt(ciphertext)
 
 def encrypt_file(file_data):
-    """File: Salsa20 → Camellia CBC → Base64"""
-    # 1. Salsa20 encrypt
-    salsa_encrypted = salsa20_encrypt(file_data)
+    """File: AES-128-CTR → Camellia CBC → Base64"""
+    # 1. AES-CTR encrypt
+    aes_encrypted = aes_ctr_encrypt(file_data)
     # 2. Camellia CBC encrypt
-    return camellia_encrypt_bytes(salsa_encrypted.encode())
+    return camellia_encrypt_bytes(aes_encrypted.encode())
 
 def decrypt_file(encrypted_data):
-    """File: Base64 decode → Camellia CBC decrypt → Salsa20 decrypt"""
+    """File: Base64 decode → Camellia CBC decrypt → AES-CTR decrypt"""
     # 1. Camellia CBC decrypt
     camellia_decrypted = camellia_decrypt_bytes(encrypted_data).decode()
-    # 2. Salsa20 decrypt
-    return salsa20_decrypt(camellia_decrypted)
+    # 2. AES-CTR decrypt
+    return aes_ctr_decrypt(camellia_decrypted)
 
-# === WATERMARKING ===
-def embed_watermark(image_file, watermark_text):
-    """Embed watermark using Bit Plane Slicing → return bytes"""
+# === TRUE BIT PLANE SLICING WATERMARKING ===
+def embed_watermark_bitplane(image_file, watermark_text, bit_planes=[0, 1, 2]):
+    """
+    TRUE Bit Plane Slicing - Embed watermark in multiple bit planes
+    bit_planes: list of bit positions (0-7) to use for embedding
+    """
     img = Image.open(image_file).convert('RGB')
-    arr = np.array(img)
+    arr = np.array(img, dtype=np.uint8)
     
     # Convert watermark to binary
     watermark_bin = ''.join(format(ord(c), '08b') for c in watermark_text)
     watermark_bin += '00000000'  # Null terminator
     
-    # Embed in LSB
+    # Embed in selected bit planes
     flat = arr.flatten()
-    for i, bit in enumerate(watermark_bin[:len(flat)]):
-        if i < len(flat):
-            flat[i] = (flat[i] & 0xFE) | int(bit)
+    watermark_index = 0
+    
+    for i in range(len(flat)):
+        if watermark_index >= len(watermark_bin):
+            break
+            
+        current_pixel = flat[i]
+        
+        for bit_pos in bit_planes:
+            if watermark_index >= len(watermark_bin):
+                break
+                
+            # Clear the target bit
+            mask = 0xFF ^ (1 << bit_pos)
+            current_pixel = current_pixel & mask
+            
+            # Set the bit from watermark
+            bit_value = int(watermark_bin[watermark_index])
+            current_pixel = current_pixel | (bit_value << bit_pos)
+            watermark_index += 1
+        
+        flat[i] = current_pixel
     
     watermarked_arr = flat.reshape(arr.shape)
-    watermarked_img = Image.fromarray(watermarked_arr.astype('uint8'))
+    watermarked_img = Image.fromarray(watermarked_arr)
     
-    # Convert to bytes
     img_byte_arr = BytesIO()
     watermarked_img.save(img_byte_arr, format='PNG')
     return img_byte_arr.getvalue()
 
-def extract_watermark_from_bytes(image_data):
-    """Extract watermark from image bytes using Bit Plane Slicing"""
+def extract_watermark_bitplane(image_data, bit_planes=[0, 1, 2]):
+    """
+    Extract watermark from multiple bit planes
+    bit_planes: list of bit positions (0-7) used for embedding
+    """
     img = Image.open(BytesIO(image_data)).convert('RGB')
-    arr = np.array(img)
+    arr = np.array(img, dtype=np.uint8)
     
-    # Extract LSB
     flat = arr.flatten()
-    binary_str = ''.join(str(pixel & 1) for pixel in flat)
+    binary_str = ''
+    
+    for pixel in flat:
+        for bit_pos in bit_planes:
+            bit_value = (pixel >> bit_pos) & 1
+            binary_str += str(bit_value)
     
     # Convert binary to text
     chars = []
@@ -195,3 +236,14 @@ def extract_watermark_from_bytes(image_data):
         chars.append(chr(int(byte, 2)))
     
     return ''.join(chars)
+
+# === COMPATIBILITY FUNCTIONS ===
+def embed_watermark(image_file, watermark_text):
+    """Default watermark using LSB (bit plane 0) for compatibility"""
+    return embed_watermark_bitplane(image_file, watermark_text, bit_planes=[0])
+
+def extract_watermark_from_bytes(image_data, bit_planes=None):
+    """Extraction with customizable bit planes"""
+    if bit_planes is None:
+        bit_planes = [0]  # Default to LSB for compatibility
+    return extract_watermark_bitplane(image_data, bit_planes)
