@@ -2,7 +2,7 @@ import base64
 import os
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import hashes, hmac
-from Crypto.Cipher import AES, ChaCha20_Poly1305
+from Crypto.Cipher import AES
 from PIL import Image
 import numpy as np
 from io import BytesIO
@@ -124,43 +124,56 @@ def decrypt_metadata(encrypted_data):
     # 3. Caesar decrypt
     return caesar_decrypt(aes_decrypted.decode())
 
-# === FILE ENCRYPTION ===
-def chacha20_poly1305_encrypt(data):
-    """ChaCha20-Poly1305 encryption → Base64"""
-    cipher = ChaCha20_Poly1305.new(key=MASTER_KEY[:32])
-    ciphertext, tag = cipher.encrypt_and_digest(data)
-    # Format: nonce (12 bytes) + tag (16 bytes) + ciphertext
-    return base64.b64encode(cipher.nonce + tag + ciphertext).decode()
+# === FILE ENCRYPTION (AES-CTR) ===
+def aes_ctr_encrypt(data):
+    """AES-128-CTR encryption → Base64"""
+    # Nonce 8 bytes + Counter 8 bytes = 16 bytes total
+    nonce = os.urandom(8)
 
-def chacha20_poly1305_decrypt(encrypted_data):
-    """Base64 decode → ChaCha20-Poly1305 decryption → bytes"""
+    # Buat cipher AES-128-CTR
+    # Format: nonce (8 bytes) akan digabung dengan counter (8 bytes) secara internal
+    cipher = AES.new(MASTER_KEY[:16], AES.MODE_CTR, nonce=nonce)
+    
+    # Encrypt data (CTR mode tidak butuh padding)
+    ciphertext = cipher.encrypt(data)
+    
+    return base64.b64encode(nonce + ciphertext).decode()
+
+def aes_ctr_decrypt(encrypted_data):
+    """Base64 decode → AES-CTR decryption → bytes"""
     data = base64.b64decode(encrypted_data)
-    nonce, tag, ciphertext = data[:12], data[12:28], data[28:]
-    cipher = ChaCha20_Poly1305.new(key=MASTER_KEY[:32], nonce=nonce)
-    return cipher.decrypt_and_verify(ciphertext, tag)
+    
+    # Extract nonce (8 bytes) dan ciphertext
+    nonce, ciphertext = data[:8], data[8:]
+    
+    # Buat cipher AES-CTR dengan nonce yang sama
+    cipher = AES.new(MASTER_KEY[:16], AES.MODE_CTR, nonce=nonce)
+    
+    # Decrypt data
+    return cipher.decrypt(ciphertext)
 
 def encrypt_file(file_data):
-    """File: ChaCha20-Poly1305 → Camellia CBC → Base64"""
-    # 1. ChaCha20-Poly1305 encrypt
-    chacha_encrypted = chacha20_poly1305_encrypt(file_data)
+    """File: AES-128-CTR → Camellia CBC → Base64"""
+    # 1. AES-CTR encrypt
+    aes_encrypted = aes_ctr_encrypt(file_data)
     # 2. Camellia CBC encrypt
-    return camellia_encrypt_bytes(chacha_encrypted.encode())
+    return camellia_encrypt_bytes(aes_encrypted.encode())
 
 def decrypt_file(encrypted_data):
-    """File: Base64 decode → Camellia CBC decrypt → ChaCha20-Poly1305 decrypt"""
+    """File: Base64 decode → Camellia CBC decrypt → AES-CTR decrypt"""
     # 1. Camellia CBC decrypt
     camellia_decrypted = camellia_decrypt_bytes(encrypted_data).decode()
-    # 2. ChaCha20-Poly1305 decrypt
-    return chacha20_poly1305_decrypt(camellia_decrypted)
+    # 2. AES-CTR decrypt
+    return aes_ctr_decrypt(camellia_decrypted)
 
-# === TRUE BIT PLANE SLICING WATERMARKING (FIXED) ===
+# === TRUE BIT PLANE SLICING WATERMARKING ===
 def embed_watermark_bitplane(image_file, watermark_text, bit_planes=[0, 1, 2]):
     """
     TRUE Bit Plane Slicing - Embed watermark in multiple bit planes
     bit_planes: list of bit positions (0-7) to use for embedding
     """
     img = Image.open(image_file).convert('RGB')
-    arr = np.array(img, dtype=np.uint8)  # Pastikan dtype uint8
+    arr = np.array(img, dtype=np.uint8)
     
     # Convert watermark to binary
     watermark_bin = ''.join(format(ord(c), '08b') for c in watermark_text)
@@ -180,8 +193,8 @@ def embed_watermark_bitplane(image_file, watermark_text, bit_planes=[0, 1, 2]):
             if watermark_index >= len(watermark_bin):
                 break
                 
-            # Clear the target bit (gunakan AND dengan mask yang benar)
-            mask = 0xFF ^ (1 << bit_pos)  # Mask untuk clear bit tertentu
+            # Clear the target bit
+            mask = 0xFF ^ (1 << bit_pos)
             current_pixel = current_pixel & mask
             
             # Set the bit from watermark
