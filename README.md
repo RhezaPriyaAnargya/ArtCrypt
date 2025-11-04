@@ -189,31 +189,8 @@ Script akan menampilkan statistik, contoh hasil dekripsi metadata, dan (opsional
 - Watermark BPS menyematkan identitas Creator di gambar.
 - Optimasi performa: lazy loading & dekripsi on-demand, pagination, opsi kualitas pratinjau, dan jalur cepat LSB untuk watermark.
 
----
 
-## Troubleshooting
 
-- "ModuleNotFoundError: cryptography/pycryptodome/Pillow":
-  ```powershell
-  pip install cryptography pycryptodome pillow numpy
-  ```
-- "Python integer -2 out of bounds for uint8": terjadi saat manipulasi bit pada array `uint8`. Sudah diperbaiki dengan casting `int()` sebelum operasi bit dan kembali ke `np.uint8`.
-- "cannot identify image file <_io.BytesIO...>": pastikan pointer file di-reset (`seek(0)`) sebelum `Image.open(...)`.
-- Gagal install `salsa20`: proyek ini tidak membutuhkan paket itu; gunakan implementasi saat ini (AES-CTR + Camellia). 
-- DB locked: tutup aplikasi lain yang memakai `artcrypt.db` atau salin file ke lokasi lain.
-
----
-
-## Catatan Keamanan
-
-- Jangan gunakan `MASTER_KEY` bawaan untuk produksi. Ganti dan simpan sebagai variabel lingkungan; sesuaikan pemuatan kunci di `crypto_utils.py`.
-- Backup database secara berkala.
-
----
-
-## Lisensi
-
-Proyek ini untuk keperluan pembelajaran. Sesuaikan lisensi sesuai kebutuhan sebelum publikasi.
 
 ---
 
